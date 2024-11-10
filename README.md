@@ -137,3 +137,5 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ### Notes
 
 - The `cookies.txt` file is optional but recommended for unrestricted access to all YouTube videos.
+- if you see this ```ERROR: [youtube] vDtfJ47QDi4: Sign in to confirm you’re not a bot. This helps protect our community. Learn more``` you need a cookie
+
