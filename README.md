@@ -1,6 +1,4 @@
-Here's a `README.md` file that includes installation instructions, setup, and usage information for your Discord music bot. This file is formatted in Markdown and can be placed directly in your GitHub repository.
 
----
 
 # Discord Music Bot
 
@@ -125,8 +123,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-### Notes
 
-Replace `YOUR_USERNAME` in the GitHub URL with your actual GitHub username before adding this to your repository.
-
-Let me know if you need any further customization for the `README.md`!
