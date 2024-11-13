@@ -3,13 +3,12 @@ from discord.ext import commands
 import yt_dlp as youtube_dl
 import asyncio
 import re
-import os
 
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
 
-TOKEN = 'YOUR_DISCORD_BOT_TOKEN'  # Replace with your actual bot token
+TOKEN = "BOT_TOKEN"
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Global variables for queue and currently playing song
@@ -39,31 +38,25 @@ async def play(interaction: discord.Interaction, query: str):
     else:
         ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'nocheckcertificate': True}
         
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(f"ytsearch:{query}", download=False)
-                top_result = info['entries'][0]
-                song_queue.append({'title': top_result['title'], 'url': top_result['webpage_url']})
-                embed.description = f"Added to queue: {top_result['title']}"
-                await interaction.edit_original_response(embed=embed)
-            except Exception as e:
-                embed.description = "An error occurred while searching YouTube."
-                await interaction.edit_original_response(embed=embed)
-                print(e)
-                return
+        def fetch_results():
+            with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(f"ytsearch:{query}", download=False)
+        
+        loop = asyncio.get_running_loop()
+        try:
+            info = await loop.run_in_executor(None, fetch_results)
+            top_result = info['entries'][0]
+            song_queue.append({'title': top_result['title'], 'url': top_result['webpage_url']})
+            embed.description = f"Added to queue: {top_result['title']}"
+            await interaction.edit_original_response(embed=embed)
+        except Exception as e:
+            embed.description = "An error occurred while searching YouTube."
+            await interaction.edit_original_response(embed=embed)
+            print(e)
+            return
 
     if not interaction.guild.voice_client or not interaction.guild.voice_client.is_playing():
         await play_next_song(interaction)
-
-@bot.tree.command(name="skip", description="Skips the currently playing song.")
-async def skip(interaction: discord.Interaction):
-    embed = discord.Embed(title="Skip Command", color=0x1E90FF)
-    if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
-        interaction.guild.voice_client.stop()
-        embed.description = "Song skipped."
-    else:
-        embed.description = "No song is currently playing."
-    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="search", description="Searches YouTube for videos based on a keyword.")
 async def search(interaction: discord.Interaction, keyword: str):
@@ -72,16 +65,21 @@ async def search(interaction: discord.Interaction, keyword: str):
 
     ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'nocheckcertificate': True}
 
-    results = []
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(f"ytsearch5:{keyword}", download=False)
-            results = info['entries']
-        except Exception as e:
-            embed.description = "An error occurred while searching YouTube."
-            await interaction.edit_original_response(embed=embed)
-            print(e)
-            return
+    # Define fetch_results as a synchronous function
+    def fetch_results():
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(f"ytsearch5:{keyword}", download=False)
+
+    # Run yt_dlp in an executor to prevent blocking
+    loop = asyncio.get_running_loop()
+    try:
+        info = await loop.run_in_executor(None, fetch_results)
+        results = info.get('entries', [])
+    except Exception as e:
+        embed.description = "An error occurred while searching YouTube."
+        await interaction.edit_original_response(embed=embed)
+        print(e)
+        return
 
     if not results:
         embed.description = "No results found."
@@ -128,38 +126,37 @@ async def play_next_song(interaction):
         current_song = None
 
 async def play_selected_song(interaction, url):
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
-        'outtmpl': 'song', 'quiet': True, 'nocheckcertificate': True
-    }
+    ydl_opts = {'format': 'bestaudio/best', 'quiet': True, 'nocheckcertificate': True}
 
-    def _download():
+    def get_stream_url():
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             current_song['title'] = info.get('title')
             current_song['url'] = info.get('webpage_url')
-            current_song['thumbnail'] = info.get('thumbnail')  # Get thumbnail URL
-            current_song['duration'] = info.get('duration')  # Duration in seconds
-
-            ydl.download([url])  # Download the audio
+            current_song['thumbnail'] = info.get('thumbnail')
+            current_song['duration'] = info.get('duration')
+            return info['url']
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, _download)
+        stream_url = await loop.run_in_executor(None, get_stream_url)
         
-        if not os.path.exists("song.mp3"):
-            embed = discord.Embed(title="Playback Error", description="Download failed. Could not find the audio file.", color=0xFF0000)
-            await interaction.edit_original_response(embed=embed)
-            return
-
         if not interaction.guild.voice_client:
             await interaction.user.voice.channel.connect()
 
         interaction.guild.voice_client.play(
-            discord.FFmpegPCMAudio(os.path.abspath("song.mp3")),
+            discord.FFmpegOpusAudio(stream_url),
             after=lambda e: asyncio.run_coroutine_threadsafe(play_next_song(interaction), bot.loop)
         )
+
+        embed = discord.Embed(
+            title="🎶 Now Playing",
+            description=f"[{current_song['title']}]({current_song['url']})",
+            color=0x1E90FF
+        )
+        embed.set_thumbnail(url=current_song['thumbnail'])
+        await interaction.edit_original_response(embed=embed)
+        
     except youtube_dl.utils.ExtractorError as e:
         embed = discord.Embed(title="Playback Error", description="Unable to download the video. It may be age-restricted or require sign-in.", color=0xFF0000)
         await interaction.edit_original_response(embed=embed)
@@ -167,6 +164,16 @@ async def play_selected_song(interaction, url):
         embed = discord.Embed(title="Playback Error", description="An error occurred during playback.", color=0xFF0000)
         await interaction.edit_original_response(embed=embed)
         print(e)
+
+@bot.tree.command(name="skip", description="Skips the currently playing song.")
+async def skip(interaction: discord.Interaction):
+    embed = discord.Embed(title="Skip Command", color=0x1E90FF)
+    if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+        interaction.guild.voice_client.stop()
+        embed.description = "Song skipped."
+    else:
+        embed.description = "No song is currently playing."
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="stop", description="Stops the currently playing song and disconnects the bot")
 async def stop(interaction: discord.Interaction):
@@ -192,7 +199,6 @@ async def queue(interaction: discord.Interaction):
 @bot.tree.command(name="nowplaying", description="Shows the currently playing song.")
 async def nowplaying(interaction: discord.Interaction):
     if current_song:
-        # Format duration in mm:ss
         duration_minutes = current_song['duration'] // 60
         duration_seconds = current_song['duration'] % 60
         duration_text = f"{duration_minutes:02}:{duration_seconds:02}"
@@ -206,9 +212,7 @@ async def nowplaying(interaction: discord.Interaction):
         embed.add_field(name="Source", value="YouTube", inline=True)
         embed.add_field(name="Duration", value=duration_text, inline=True)
         
-        embed.set_thumbnail(url=current_song['thumbnail'])  # Set video thumbnail
-        embed.set_footer(text="Requested by " + interaction.user.display_name, icon_url=interaction.user.avatar.url)
-
+        embed.set_thumbnail(url=current_song['thumbnail'])
         await interaction.response.send_message(embed=embed)
     else:
         embed = discord.Embed(
